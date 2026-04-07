@@ -22,7 +22,7 @@ For each run:
 Collates all summary results into a single comparison table:
   20250624_5800/model/cv5/CV_summary_clean_table.csv
 
-Input files expected in: data/20250624_5800/csr/
+Input files expected in: outputs/csr/
 Output written to:       20250624_5800/model/cv5/
 """
 
@@ -199,19 +199,22 @@ def run_cv_perovskite_only(df_5, base_dir):
     """Run 5-fold CV for perovskite-only representations (CBFV comparison).
 
     Representations: oliynyk, magpie, mat2vec, dummy
-    Target: lnTS80m
+    Target: determined by pipeline_config
 
-    Output: data/20250624_5800/model/cv5_per_only/
+    Output: outputs/model/cv5_per_only/
     """
+    import pipeline_config
+
     print("\n" + "=" * 60)
     print("5-fold CV — perovskite-only representations")
     print("=" * 60)
 
+    target_col = pipeline_config.target_column()
     csr_dir = os.path.join(base_dir, "csr")
     out_dir = os.path.join(base_dir, "model", "cv5_per_only")
     os.makedirs(out_dir, exist_ok=True)
 
-    y_vec = ensure_1d_y(df_5["lnTS80m"])
+    y_vec = ensure_1d_y(df_5[target_col])
 
     rep_files = {
         "oliynyk": (
@@ -277,8 +280,9 @@ def run_cv_perovskite_only(df_5, base_dir):
         ["representation", "stat"]
     ).reset_index(drop=True)
 
-    all_metrics_df.to_csv(os.path.join(out_dir, "cv5_metrics_per_sp0_lnTS80m_RF.csv"), index=False)
-    summary_df.to_csv(os.path.join(out_dir, "cv5_summary_per_sp0_lnTS80m_RF.csv"), index=False)
+    tag = pipeline_config.target_file_tag()
+    all_metrics_df.to_csv(os.path.join(out_dir, f"cv5_metrics_per_sp0_{tag}_RF.csv"), index=False)
+    summary_df.to_csv(os.path.join(out_dir, f"cv5_summary_per_sp0_{tag}_RF.csv"), index=False)
     print(f"\n  Saved results to: {out_dir}")
     print(summary_df.to_string(index=False))
 
@@ -301,7 +305,7 @@ def run_cv_all_features(df_5, base_dir, targets=None):
       sp  : 0, 1, 2, 3
     → 2 × 4 = 8 configurations per target
 
-    Output: data/20250624_5800/model/cv5/
+    Output: outputs/model/cv5/
     """
     if targets is None:
         targets = ["lnTS80m"]
@@ -353,7 +357,7 @@ def collate_cv_results(base_dir, targets=None):
     targets : list of str, or None
         Target names to include.  Defaults to ["lnTS80m"].
 
-    Output: data/20250624_5800/model/cv5/CV_summary_clean_table.csv
+    Output: outputs/model/cv5/CV_summary_clean_table.csv
     """
     if targets is None:
         targets = ["lnTS80m"]
@@ -405,7 +409,7 @@ def collate_cv_results(base_dir, targets=None):
 # 8. Settings
 # =============================================================================
 # Set RUN_TS80M = True to additionally run raw TS80m regression.
-# When False (default), only ln(TS80m) is analysed.
+# When False (default), only the primary target is analysed.
 RUN_TS80M = False
 
 
@@ -413,19 +417,30 @@ RUN_TS80M = False
 # 9. Main
 # =============================================================================
 def main():
-    base_dir = "data/20250624_5800"
-    data_path = os.path.join(base_dir, "raw", "Perovskite_5800data_addln.csv")
+    import pipeline_config
+
+    base_dir = "outputs"
+    data_path = os.path.join(base_dir, "curated", "Perovskite_5800data_addln.csv")
 
     df_5 = pd.read_csv(data_path)
     print(f"Loaded: {len(df_5)} rows from {data_path}")
 
-    # Determine active targets
-    targets = ["lnTS80m"]
-    if RUN_TS80M:
+    # Determine active targets from pipeline_config
+    primary_target = pipeline_config.target_column()  # "lnTS80m" or "JV_default_PCE"
+
+    # For PCE mode, drop rows where JV_default_PCE is NaN
+    if primary_target == "JV_default_PCE":
+        n_before = len(df_5)
+        df_5 = df_5.dropna(subset=["JV_default_PCE"]).reset_index(drop=True)
+        print(f"  Dropped {n_before - len(df_5)} rows with missing PCE "
+              f"→ {len(df_5)} rows remain")
+
+    targets = [primary_target]
+    if RUN_TS80M and primary_target != "TS80m":
         targets.append("TS80m")
     print(f"Active targets: {targets}")
 
-    # Step 1: Perovskite-only CV (CBFV comparison, lnTS80m only)
+    # Step 1: Perovskite-only CV (CBFV comparison)
     run_cv_perovskite_only(df_5, base_dir)
 
     # Step 2: All-feature CV (main grid)
@@ -435,8 +450,6 @@ def main():
     collate_cv_results(base_dir, targets=targets)
 
     print("\n=== Reanalysis complete ===")
-    if not RUN_TS80M:
-        print("Tip: set RUN_TS80M = True at the top of this file to also run TS80m regression.")
 
 
 if __name__ == "__main__":

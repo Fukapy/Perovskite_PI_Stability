@@ -16,7 +16,7 @@ At t = TS80m, PCE / PCE0 = 0.80:
 
 Inputs
 ------
-data/20250624_5800/raw/Perovskite_5800data_addln.csv
+outputs/curated/Perovskite_5800data_addln.csv
   (or the _extract variant — column names are detected automatically)
 
 Outputs (figures/)
@@ -41,8 +41,8 @@ warnings.filterwarnings("ignore")
 # =============================================================================
 # 2. Settings — adjust these to tune the plot
 # =============================================================================
-CSV_PATH    = Path("data/20250624_5800/raw/Perovskite_5800data_addln.csv")
-FIGURES_DIR = Path("figures")
+CSV_PATH    = Path("outputs/curated/Perovskite_5800data_addln.csv")
+FIGURES_DIR = Path("outputs/figures")
 
 # Annealing condition filters
 TEMP_MIN    = 55    # °C  (lower bound for anneal temperature)

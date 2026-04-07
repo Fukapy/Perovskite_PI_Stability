@@ -17,7 +17,7 @@ Computes SHAP values using TreeExplainer and generates:
 Prerequisites:
   - A trained FULL model (.pkl) from 20260214_reanalysis.py
   - The corresponding CSR feature matrix
-  - data/20250624_5800/raw/Perovskite_5800data_addln.csv  (for column classification)
+  - outputs/raw/Perovskite_5800data_addln.csv  (for column classification)
 
 Configuration is via the MODEL_CONFIGS list at the bottom of the file.
 Add entries to run analysis for multiple models in one pass.
@@ -71,7 +71,7 @@ def classify_columns(df_5, exclude=None):
                  descending (prevents partial prefix shadowing)
     """
     if exclude is None:
-        exclude = {"Original_index", "TS80", "TS80m", "lnTS80m"}
+        exclude = {"Original_index", "TS80", "TS80m", "lnTS80m", "JV_default_PCE"}
 
     num_cols, obj_cols = [], []
     for col in df_5.columns:
@@ -346,42 +346,54 @@ def run_shap_analysis(
 
 
 # =============================================================================
-# 11. Model configurations
+# 11. Model configurations per target
 # =============================================================================
-# Add or modify entries here to analyse additional models.
-# Fields:
-#   model_path       — path to rf_model_*_FULL.pkl
-#   csr_path         — path to the corresponding *_csr.npz
-#   col_path         — path to the corresponding *_columns.npy
-#   tag              — string used in output filenames
-#   target_label     — axis label for SHAP plot (e.g. "ln(TS80m)")
-#   n_samples        — rows to subsample for SHAP (None = all; 2000–5000 is fast)
-#   cbfv_block_label — label for unmatched CBFV features
-MODEL_CONFIGS = [
+STABILITY_SHAP_CONFIGS = [
     dict(
-        model_path="data/20250624_5800/model/cv5/rf_model_lnTS80m_all_sp3_dummy_zero_FULL.pkl",
-        csr_path  ="data/20250624_5800/csr/all_sp3_dummy_zero_csr.npz",
-        col_path  ="data/20250624_5800/csr/all_sp3_dummy_zero_columns.npy",
-        tag           ="lnTS80m_all_sp3_dummy_zero_FULL",
-        target_label  ="ln(TS80m)",
-        n_samples     =None,
-        cbfv_block_label="UNMATCHED",   # dummy run: no explicit CBFV block
-    ),
-    dict(
-        model_path="data/20250624_5800/model/cv5/rf_model_lnTS80m_all_sp2_dummy_zero_FULL.pkl",
-        csr_path  ="data/20250624_5800/csr/all_sp2_dummy_zero_csr.npz",
-        col_path  ="data/20250624_5800/csr/all_sp2_dummy_zero_columns.npy",
+        model_path="outputs/model/cv5/rf_model_lnTS80m_all_sp2_dummy_zero_FULL.pkl",
+        csr_path  ="outputs/csr/all_sp2_dummy_zero_csr.npz",
+        col_path  ="outputs/csr/all_sp2_dummy_zero_columns.npy",
         tag           ="lnTS80m_all_sp2_dummy_zero_FULL",
         target_label  ="ln(TS80m)",
         n_samples     =None,
         cbfv_block_label="UNMATCHED",
     ),
     dict(
-        model_path="data/20250624_5800/model/cv5/rf_model_TS80m_all_sp0_oliynyk_zero_FULL.pkl",
-        csr_path  ="data/20250624_5800/csr/all_sp0_oliynyk_zero_csr.npz",
-        col_path  ="data/20250624_5800/csr/all_sp0_oliynyk_zero_columns.npy",
+        model_path="outputs/model/cv5/rf_model_lnTS80m_all_sp3_dummy_zero_FULL.pkl",
+        csr_path  ="outputs/csr/all_sp3_dummy_zero_csr.npz",
+        col_path  ="outputs/csr/all_sp3_dummy_zero_columns.npy",
+        tag           ="lnTS80m_all_sp3_dummy_zero_FULL",
+        target_label  ="ln(TS80m)",
+        n_samples     =None,
+        cbfv_block_label="UNMATCHED",
+    ),
+    dict(
+        model_path="outputs/model/cv5/rf_model_TS80m_all_sp0_oliynyk_zero_FULL.pkl",
+        csr_path  ="outputs/csr/all_sp0_oliynyk_zero_csr.npz",
+        col_path  ="outputs/csr/all_sp0_oliynyk_zero_columns.npy",
         tag           ="TS80m_all_sp0_oliynyk_zero_FULL",
         target_label  ="TS80m",
+        n_samples     =None,
+        cbfv_block_label="Perovskite_Oliynyk_features",
+    ),
+]
+
+PCE_SHAP_CONFIGS = [
+    dict(
+        model_path="outputs/model/cv5/rf_model_JV_default_PCE_all_sp2_dummy_zero_FULL.pkl",
+        csr_path  ="outputs/csr/all_sp2_dummy_zero_csr.npz",
+        col_path  ="outputs/csr/all_sp2_dummy_zero_columns.npy",
+        tag           ="JV_default_PCE_all_sp2_dummy_zero_FULL",
+        target_label  ="PCE (%)",
+        n_samples     =None,
+        cbfv_block_label="UNMATCHED",
+    ),
+    dict(
+        model_path="outputs/model/cv5/rf_model_JV_default_PCE_all_sp2_oliynyk_zero_FULL.pkl",
+        csr_path  ="outputs/csr/all_sp2_oliynyk_zero_csr.npz",
+        col_path  ="outputs/csr/all_sp2_oliynyk_zero_columns.npy",
+        tag           ="JV_default_PCE_all_sp2_oliynyk_zero_FULL",
+        target_label  ="PCE (%)",
         n_samples     =None,
         cbfv_block_label="Perovskite_Oliynyk_features",
     ),
@@ -392,13 +404,21 @@ MODEL_CONFIGS = [
 # 12. Main
 # =============================================================================
 def main():
-    data_path = "data/20250624_5800/raw/Perovskite_5800data_addln.csv"
-    out_dir   = "data/20250624_5800/model/shap"
+    import pipeline_config
+
+    data_path = "outputs/curated/Perovskite_5800data_addln.csv"
+    out_dir   = "outputs/model/shap"
 
     df_5 = pd.read_csv(data_path)
     print(f"Loaded: {len(df_5)} rows from {data_path}")
 
-    for cfg in MODEL_CONFIGS:
+    # Select configurations based on target
+    if pipeline_config.TARGET_MODE == "PCE":
+        configs = PCE_SHAP_CONFIGS
+    else:
+        configs = STABILITY_SHAP_CONFIGS
+
+    for cfg in configs:
         run_shap_analysis(
             model_path      =cfg["model_path"],
             csr_path        =cfg["csr_path"],

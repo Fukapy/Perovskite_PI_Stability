@@ -1,29 +1,25 @@
 """
 Feature Importance Interpretation for Perovskite Stability Models
 =================================================================
-Date: 2026/02/15
+Computes feature importances as the **mean across 5-fold CV models**
+(not from a single FULL model).  For each configuration, the five
+fold models (rf_model_{tag}_fold1.pkl … fold5.pkl) are loaded, their
+Gini importances are extracted, and the per-feature mean ± std are
+reported.
 
-Loads trained FULL models (from reanalysis.py) and computes feature
-importances at three levels of aggregation:
+Three levels of aggregation:
 
   Level 1 — raw expanded features
-      e.g. "Perovskite_deposition_thermal_annealing_temperature_100"
-      → fti_{model_tag}.csv
+      → fti_{tag}_cv5mean.csv
 
   Level 2 — original DB column groups
-      e.g. "Perovskite_deposition_thermal_annealing_temperature"
-      Numerical: exact match | Categorical: prefix match col_value→col
-      → fti_sum_{model_tag}.csv
+      → fti_sum_{tag}_cv5mean.csv
 
-  Level 3 — layer / process categories  (new)
-      e.g. "Perovskite (deposition)", "ETL", "HTL", …
-      Prefix-based grouping of Level-2 results; longest prefix wins.
-      → fti_layer_{model_tag}.csv
+  Level 3 — layer / process categories
+      → fti_layer_{tag}_cv5mean.csv
 
-Runs the analysis for a configurable list of (model_tag, csr_columns_tag) pairs.
-
-Input directory: data/20250624_5800/model/cv5/
-                 data/20250624_5800/csr/
+Input directory: outputs/model/cv5/
+                 outputs/csr/
 """
 
 # =============================================================================
@@ -56,7 +52,7 @@ def classify_columns(df_5, exclude=None):
     obj_list : pd.Index of categorical column names
     """
     if exclude is None:
-        exclude = ["Original_index", "TS80", "TS80m", "lnTS80m"]
+        exclude = ["Original_index", "TS80", "TS80m", "lnTS80m", "JV_default_PCE"]
 
     num_cols = []
     obj_cols = []
@@ -74,25 +70,37 @@ def classify_columns(df_5, exclude=None):
 
 
 # =============================================================================
-# 3. Feature importance extraction
+# 3. Feature importance extraction (5-fold CV mean)
 # =============================================================================
-def extract_raw_fti(model, columns):
-    """Return a sorted pd.Series of feature importances.
+N_FOLDS = 5
+
+
+def extract_cv_mean_fti(model_paths, columns):
+    """Compute the mean and std of Gini feature importances across CV folds.
 
     Parameters
     ----------
-    model   : fitted RandomForestRegressor
-    columns : array-like of expanded feature names
+    model_paths : list of str — paths to fold model .pkl files
+    columns     : array-like of expanded feature names
 
     Returns
     -------
-    fti_sort : pd.Series sorted descending
+    fti_mean : pd.Series — mean importance per feature (sorted descending)
+    fti_std  : pd.Series — std of importance per feature (same order)
     """
-    fti = pd.Series(
-        model.feature_importances_,
-        index=pd.Index(columns, dtype="object"),
-    )
-    return fti.sort_values(ascending=False)
+    col_index = pd.Index(columns, dtype="object")
+    fti_matrix = np.zeros((len(model_paths), len(columns)))
+
+    for i, path in enumerate(model_paths):
+        model = joblib.load(path)
+        fti_matrix[i, :] = model.feature_importances_
+
+    fti_mean = pd.Series(fti_matrix.mean(axis=0), index=col_index)
+    fti_std  = pd.Series(fti_matrix.std(axis=0, ddof=1), index=col_index)
+
+    # Sort by mean descending
+    order = fti_mean.sort_values(ascending=False).index
+    return fti_mean.reindex(order), fti_std.reindex(order)
 
 
 # =============================================================================
@@ -240,57 +248,71 @@ def aggregate_fti(fti, num_list, obj_list, cbfv_block_label=None):
 
 
 # =============================================================================
-# 7. Per-model analysis pipeline
+# 7. Per-configuration analysis pipeline (5-fold CV mean)
 # =============================================================================
-def analyze_model(
-    model_path,
+def analyze_cv_models(
+    model_dir,
+    base_tag,
     columns_path,
     df_5,
     out_dir,
-    tag,
     cbfv_block_label=None,
     layer_map=None,
+    n_folds=N_FOLDS,
 ):
-    """Load a model and run 3-level feature importance analysis.
+    """Load 5-fold CV models and run 3-level feature importance analysis
+    using the mean importance across folds.
 
     Parameters
     ----------
-    model_path       : path to .pkl model file
+    model_dir        : directory containing rf_model_*_fold{k}.pkl
+    base_tag         : tag WITHOUT _FULL suffix
+                       e.g. "lnTS80m_all_sp2_dummy_zero"
     columns_path     : path to .npy expanded feature names
     df_5             : curated DataFrame for column classification
-    out_dir          : output directory
-    tag              : string tag used in output filenames
+    out_dir          : output directory for CSVs
     cbfv_block_label : label for the CBFV feature block (None for dummy runs)
     layer_map        : dict for Level-3 aggregation (defaults to LAYER_MAP)
 
     Returns
     -------
-    fti_sort     : pd.Series  — Level 1 (raw expanded features)
-    fti_summary  : pd.DataFrame — Level 2 (DB column groups)
-    fti_layer    : pd.DataFrame — Level 3 (layer/process categories)
+    fti_mean    : pd.Series  — Level 1 (mean across folds)
+    fti_summary : pd.DataFrame — Level 2 (DB column groups)
+    fti_layer   : pd.DataFrame — Level 3 (layer/process categories)
     """
-    print(f"\n  Model : {os.path.basename(model_path)}")
+    # Locate fold models
+    model_paths = []
+    for k in range(1, n_folds + 1):
+        p = os.path.join(model_dir, f"rf_model_{base_tag}_fold{k}.pkl")
+        if not os.path.exists(p):
+            raise FileNotFoundError(f"Fold model not found: {p}")
+        model_paths.append(p)
 
-    model = joblib.load(model_path)
+    print(f"\n  Config: {base_tag}  ({n_folds} folds)")
     columns = np.load(columns_path, allow_pickle=True)
 
-    # --- Level 1: raw feature importances ---
-    fti_sort = extract_raw_fti(model, columns)
-    raw_out = os.path.join(out_dir, f"fti_{tag}.csv")
-    pd.DataFrame(fti_sort, columns=["feature_importance"]).to_csv(raw_out, index=True)
-    print(f"    [Lv1] Raw FTI saved      : {raw_out}  ({len(fti_sort)} features)")
+    # --- Level 1: mean feature importances across folds ---
+    fti_mean, fti_std = extract_cv_mean_fti(model_paths, columns)
+
+    out_tag = f"{base_tag}_cv5mean"
+    raw_out = os.path.join(out_dir, f"fti_{out_tag}.csv")
+    pd.DataFrame({
+        "feature_importance_mean": fti_mean,
+        "feature_importance_std":  fti_std,
+    }).to_csv(raw_out, index=True)
+    print(f"    [Lv1] CV-mean FTI saved  : {raw_out}  ({len(fti_mean)} features)")
 
     # --- Level 2: aggregate to DB column groups ---
     num_list, obj_list = classify_columns(df_5)
     print(f"    n_numeric={len(num_list)}, n_categorical={len(obj_list)}")
 
-    fti_summary = aggregate_fti(fti_sort, num_list, obj_list, cbfv_block_label)
-    agg_out = os.path.join(out_dir, f"fti_sum_{tag}.csv")
+    fti_summary = aggregate_fti(fti_mean, num_list, obj_list, cbfv_block_label)
+    agg_out = os.path.join(out_dir, f"fti_sum_{out_tag}.csv")
     fti_summary.to_csv(agg_out, index=True)
     print(f"    [Lv2] Column-level FTI   : {agg_out}  ({len(fti_summary)} groups)")
 
     # Sanity check
-    total         = float(fti_sort.sum())
+    total         = float(fti_mean.sum())
     grouped_total = float(fti_summary["feature_importance_sum"].sum())
     unmatched     = float(
         fti_summary.loc["UNMATCHED", "feature_importance_sum"]
@@ -302,69 +324,77 @@ def analyze_model(
 
     # --- Level 3: aggregate to layer/process categories ---
     fti_layer = aggregate_fti_by_layer(fti_summary, layer_map=layer_map)
-    layer_out = os.path.join(out_dir, f"fti_layer_{tag}.csv")
+    layer_out = os.path.join(out_dir, f"fti_layer_{out_tag}.csv")
     fti_layer.to_csv(layer_out, index=True)
     print(f"\n    [Lv3] Layer-level FTI    : {layer_out}")
     print(fti_layer.to_string())
 
-    return fti_sort, fti_summary, fti_layer
+    return fti_mean, fti_summary, fti_layer
 
 
 # =============================================================================
 # 8. Main
 # =============================================================================
+# =============================================================================
+# Model configurations per target
+# =============================================================================
+# Each entry: (base_tag, csr_columns_tag, cbfv_block_label)
+#   base_tag is the model tag WITHOUT "_FULL" — fold files are named
+#   rf_model_{base_tag}_fold{k}.pkl
+#   cbfv_block_label=None  → remaining features go to "UNMATCHED" (dummy runs)
+#   cbfv_block_label=str   → remaining features go to that label (oliynyk runs)
+
+STABILITY_CONFIGS = [
+    # --- lnTS80m, sp2, dummy (primary model — best CV R²) ---
+    ("lnTS80m_all_sp2_dummy_zero", "all_sp2_dummy_zero", None),
+    # --- lnTS80m, sp3, dummy ---
+    ("lnTS80m_all_sp3_dummy_zero", "all_sp3_dummy_zero", None),
+    # --- TS80m, sp0, oliynyk ---
+    ("TS80m_all_sp0_oliynyk_zero", "all_sp0_oliynyk_zero",
+     "Perovskite_Oliynyk_features"),
+]
+
+PCE_CONFIGS = [
+    # --- PCE, sp2, dummy ---
+    ("JV_default_PCE_all_sp2_dummy_zero", "all_sp2_dummy_zero", None),
+    # --- PCE, sp2, oliynyk ---
+    ("JV_default_PCE_all_sp2_oliynyk_zero", "all_sp2_oliynyk_zero",
+     "Perovskite_Oliynyk_features"),
+]
+
+
 def main():
-    base_dir = "data/20250624_5800"
+    import pipeline_config
+
+    base_dir = "outputs"
     csr_dir = os.path.join(base_dir, "csr")
     model_dir = os.path.join(base_dir, "model", "cv5")
-    data_path = os.path.join(base_dir, "raw", "Perovskite_5800data_addln.csv")
+    data_path = os.path.join(base_dir, "curated", "Perovskite_5800data_addln.csv")
 
     df_5 = pd.read_csv(data_path)
     print(f"Loaded: {len(df_5)} rows from {data_path}")
 
-    # -------------------------------------------------------------------------
-    # Define which models to interpret.
-    # Each entry: (model_tag, csr_columns_tag, cbfv_block_label)
-    #   cbfv_block_label=None  → remaining features go to "UNMATCHED" (dummy runs)
-    #   cbfv_block_label=str   → remaining features go to that label (oliynyk runs)
-    # -------------------------------------------------------------------------
-    model_configs = [
-        # --- lnTS80m, sp3, dummy (primary model) ---
-        (
-            "lnTS80m_all_sp3_dummy_zero_FULL",
-            "all_sp3_dummy_zero",
-            None,                          # dummy: no CBFV block
-        ),
-        # --- lnTS80m, sp2, dummy ---
-        (
-            "lnTS80m_all_sp2_dummy_zero_FULL",
-            "all_sp2_dummy_zero",
-            None,
-        ),
-        # --- TS80m, sp0, oliynyk ---
-        (
-            "TS80m_all_sp0_oliynyk_zero_FULL",
-            "all_sp0_oliynyk_zero",
-            "Perovskite_Oliynyk_features",  # oliynyk: remaining → CBFV block
-        ),
-    ]
+    # Select model configurations based on target
+    if pipeline_config.TARGET_MODE == "PCE":
+        model_configs = PCE_CONFIGS
+    else:
+        model_configs = STABILITY_CONFIGS
 
     print("\n" + "=" * 60)
-    print("Feature importance interpretation")
+    print(f"Feature importance interpretation  (target: {pipeline_config.TARGET_MODE})")
+    print(f"Method: mean across {N_FOLDS}-fold CV models")
     print("=" * 60)
 
-    for model_tag, col_tag, cbfv_label in model_configs:
-        model_path = os.path.join(model_dir, f"rf_model_{model_tag}.pkl")
+    for base_tag, col_tag, cbfv_label in model_configs:
         columns_path = os.path.join(csr_dir, f"{col_tag}_columns.npy")
 
-        analyze_model(
-            model_path=model_path,
+        analyze_cv_models(
+            model_dir=model_dir,
+            base_tag=base_tag,
             columns_path=columns_path,
             df_5=df_5,
             out_dir=model_dir,
-            tag=model_tag,
             cbfv_block_label=cbfv_label,
-            # layer_map=LAYER_MAP,  # default; customise here if needed
         )
 
     print("\n=== Interpretation complete ===")

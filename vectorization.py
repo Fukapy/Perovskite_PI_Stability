@@ -26,7 +26,7 @@ Builds and saves CSR feature matrices for all experimental configurations:
 After building the vectors, a quick train/test RF evaluation is run on each
 perovskite-only representation to compare CBFV schemes.
 
-Output directory: data/20250624_5800/csr/
+Output directory: outputs/csr/
 """
 
 # =============================================================================
@@ -278,8 +278,8 @@ def evaluate_perovskite_representations(y, csr_base):
 # =============================================================================
 def main():
     # ---- Paths ----
-    data_path = "data/20250624_5800/raw/Perovskite_5800data_addln.csv"
-    csr_base = "data/20250624_5800/csr"
+    data_path = "outputs/curated/Perovskite_5800data_addln.csv"
+    csr_base = "outputs/csr"
 
     import os
     os.makedirs(csr_base, exist_ok=True)
@@ -290,7 +290,7 @@ def main():
 
     # ---- Identify numerical and categorical columns ----
     exclude = {
-        "Original_index", "TS80", "TS80m", "lnTS80m",
+        "Original_index", "TS80", "TS80m", "lnTS80m", "JV_default_PCE",
         "Perovskite_composition_long_form",
     }
     num_columns = [
@@ -302,7 +302,9 @@ def main():
     print(f"Loaded: {len(df_5)} rows, {len(df_X.columns)} feature columns")
     print(f"  Numerical columns: {len(num_list)}")
 
-    y = df_5["lnTS80m"]
+    import pipeline_config
+    target_col = pipeline_config.target_column()
+    y = df_5[target_col].dropna()
 
     # ---- Build vectors ----
     build_perovskite_only_vectors(df_X, csr_base)
