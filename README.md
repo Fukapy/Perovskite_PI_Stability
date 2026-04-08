@@ -28,9 +28,9 @@ Fabrication processes strongly influence perovskite solar-cell stability, yet th
 ├── main.py                   ← Pipeline runner (executes all steps)
 ├── data_curation.py          ← Step 1: Load, filter, compute ln(TS80m)
 ├── vectorization.py          ← Step 2: Build CSR feature matrices
-├── reanalysis.py             ← Step 3: 5-fold CV + FULL model training
+├── regression.py             ← Step 3: 5-fold CV + FULL model training
 ├── interpretation.py         ← Step 4: Feature importance (Lv1–Lv3)
-├── shap_analysis.py          ← Step 5: SHAP values and bar chart
+├── shap_analysis.py          ← Step 5: SHAP values (5-fold CV, interventional)
 ├── DB_k_plot.py              ← Step 6: Apparent rate constant k surface
 │
 ├── pipeline_config.py        ← Shared config (target selection: stability / PCE)
@@ -119,7 +119,7 @@ The CBFV vectorisation additionally requires the [`CBFV`](https://github.com/kaa
 
 ---
 
-### Step 3: `reanalysis.py`
+### Step 3: `regression.py`
 
 **Purpose**: Rigorous 5-fold cross-validation of the random-forest model for ln(TS80m) across all encoding variants. Saves per-fold models, out-of-fold (OOF) predictions, and a final FULL model trained on the complete dataset.
 
@@ -138,14 +138,14 @@ The CBFV vectorisation additionally requires the [`CBFV`](https://github.com/kaa
 
 ### Step 4: `interpretation.py`
 
-**Purpose**: Compute feature importances from the FULL models at three levels of aggregation.
+**Purpose**: Compute feature importances from the **5-fold CV models** (mean across folds) at three levels of aggregation.
 
 **Three-level aggregation**:
 | Level | Output file | Description |
 |-------|-------------|-------------|
-| Lv1 | `fti_{tag}.csv` | Raw expanded features (thousands of columns) |
-| Lv2 | `fti_sum_{tag}.csv` | Aggregated by original DB column name |
-| Lv3 | `fti_layer_{tag}.csv` | Aggregated by functional layer / process category |
+| Lv1 | `fti_{tag}_cv5mean.csv` | Raw expanded features (thousands of columns) |
+| Lv2 | `fti_sum_{tag}_cv5mean.csv` | Aggregated by original DB column name |
+| Lv3 | `fti_layer_{tag}_cv5mean.csv` | Aggregated by functional layer / process category |
 
 **Layer categories** (editable via `LAYER_MAP` at the top of the file):
 `Perovskite (composition)`, `Perovskite (deposition)`, `ETL`, `HTL`, `Back contact`, `Substrate`, `Cell architecture`, `Encapsulation`, `Stability test conditions`
@@ -154,7 +154,12 @@ The CBFV vectorisation additionally requires the [`CBFV`](https://github.com/kaa
 
 ### Step 5: `shap_analysis.py`
 
-**Purpose**: Compute SHAP values for the FULL models and generate the mean SHAP bar chart, showing the top stabilising and destabilising qualitative variables.
+**Purpose**: Compute SHAP values for the **5-fold CV models** (averaged across folds) using `feature_perturbation='interventional'` for numerical stability with parallel computation via joblib.
+
+**Key changes from earlier versions**:
+- Uses fold models (fold1–fold5) instead of a single FULL model
+- `TreeExplainer(model, data=X, feature_perturbation='interventional')` prevents numerical instability when applying fold models to the full dataset
+- `joblib.Parallel` enables concurrent SHAP computation across folds
 
 **Output** (written to `outputs/model/shap/`):
 | File | Description |

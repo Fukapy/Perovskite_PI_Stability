@@ -7,9 +7,9 @@ Steps
 -----
   1  data_curation    Load and curate the Perovskite Database
   2  vectorization    Build CSR feature matrices (all encoding variants)
-  3  reanalysis       5-fold CV + FULL model training (Random Forest)
+  3  regression       5-fold CV + FULL model training (Random Forest)
   4  interpretation   Feature importance at Lv1 / Lv2 / Lv3
-  5  shap_analysis    SHAP values and bar chart
+  5  shap_analysis    SHAP values and bar chart (5-fold CV, interventional)
   6  DB_k_plot        Apparent rate constant k — 3D response surface
                       (stability mode only; skipped for PCE)
 
@@ -59,9 +59,9 @@ import pipeline_config
 STEPS = [
     (1, "data_curation",   "Data curation  — load, filter, curate dataset",    False),
     (2, "vectorization",   "Vectorization  — build all CSR feature matrices",   False),
-    (3, "reanalysis",      "Reanalysis     — 5-fold CV + FULL model training",  False),
+    (3, "regression",      "Regression     — 5-fold CV + FULL model training",  False),
     (4, "interpretation",  "Interpretation — feature importance Lv1 / Lv2 / Lv3", False),
-    (5, "shap_analysis",   "SHAP analysis  — mean SHAP values and bar chart",   False),
+    (5, "shap_analysis",   "SHAP analysis  — 5-fold CV mean SHAP (interventional)", False),
     (6, "DB_k_plot",       "DB k plot      — apparent rate constant surface",    True),
 ]
 
@@ -100,7 +100,7 @@ def _checkpoint_files(step_num: int, target_mode: str) -> list[str]:
 
     if step_num == 5:
         return [
-            f"outputs/model/shap/shap_mean_bar_{tag}_all_sp2_dummy_zero_FULL.png",
+            f"outputs/model/shap/shap_mean_bar_{tag}_all_sp2_dummy_zero_CV5mean.png",
         ]
 
     if step_num == 6:
